@@ -4,7 +4,7 @@
 
 CREATE TYPE campaign_status AS ENUM ('draft', 'active', 'paused', 'completed');
 
-CREATE TYPE lead_status AS ENUM (
+CREATE TYPE campaign_lead_status AS ENUM (
   'queued', 'invite_sent', 'connected',
   'first_message_sent', 'replied',
   'calendly_sent', 'booked', 'disqualified', 'error'
@@ -58,7 +58,7 @@ CREATE TABLE campaign_leads (
     prospect_profile_url        TEXT,
 
     -- State machine
-    status                      lead_status NOT NULL DEFAULT 'queued',
+    status                      campaign_lead_status NOT NULL DEFAULT 'queued',
     scheduled_at                TIMESTAMPTZ,
     invited_at                  TIMESTAMPTZ,
     connected_at                TIMESTAMPTZ,
