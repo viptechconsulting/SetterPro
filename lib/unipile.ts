@@ -118,6 +118,75 @@ export async function deleteAccount(accountId: string): Promise<void> {
   }
 }
 
+export async function resolveSearchParameters(
+  accountId: string,
+  url: string
+): Promise<Record<string, unknown>> {
+  const res = await fetch(
+    `${API_URL}/api/v1/linkedin/search/parameters?account_id=${encodeURIComponent(accountId)}&url=${encodeURIComponent(url)}`,
+    { headers: headers() }
+  );
+  return handleResponse<Record<string, unknown>>(res);
+}
+
+export async function searchLinkedIn(
+  accountId: string,
+  params: Record<string, unknown>,
+  page = 1,
+  count = 25
+): Promise<{ items: import("@/types/campaign").SearchResult[]; total: number }> {
+  const res = await fetch(`${API_URL}/api/v1/linkedin/search`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ account_id: accountId, category: "PEOPLE", params, page, count }),
+  });
+  const data = await handleResponse<{
+    items?: Array<{
+      provider_id: string;
+      first_name?: string;
+      last_name?: string;
+      headline?: string;
+      location?: string;
+      profile_url?: string;
+      current_company?: { name?: string };
+    }>;
+    total?: number;
+  }>(res);
+
+  const items = (data.items ?? []).map((item) => ({
+    provider_id: item.provider_id,
+    first_name: item.first_name ?? "",
+    last_name: item.last_name ?? "",
+    headline: item.headline ?? null,
+    location: item.location ?? null,
+    profile_url: item.profile_url ?? null,
+    company_name: item.current_company?.name ?? null,
+  }));
+
+  return { items, total: data.total ?? items.length };
+}
+
+export async function sendInvitation(
+  accountId: string,
+  prospectId: string,
+  note?: string
+): Promise<void> {
+  const body: Record<string, string> = { account_id: accountId, provider_id: prospectId };
+  if (note) body.message = note.slice(0, 300);
+
+  const res = await fetch(`${API_URL}/api/v1/linkedin/relations`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    const err = new Error(`Unipile sendInvitation ${res.status}: ${text}`);
+    (err as Error & { status: number }).status = res.status;
+    throw err;
+  }
+}
+
 export async function getChatMessages(
   accountId: string,
   chatId: string,

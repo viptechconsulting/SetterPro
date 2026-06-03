@@ -27,6 +27,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Handle connection accepted (invite accepted)
+  if (payload.event === "messaging.new_relation") {
+    await handleNewRelation(payload);
+    return NextResponse.json({ ok: true });
+  }
+
   // Only handle new inbound messages
   if (payload.event !== "messaging.new_message") {
     return NextResponse.json({ ok: true });
@@ -106,4 +112,43 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json({ ok: true });
+}
+
+async function handleNewRelation(payload: UnipileWebhookPayload) {
+  const admin = createAdminClient();
+  const data = payload.data ?? {};
+  const prospectId = (data.attendee_provider_id ?? data.relation_id ?? data.provider_id) as string | undefined;
+  const chatId = (data.chat_id) as string | undefined;
+  const accountId = payload.account_id;
+
+  if (!prospectId) return;
+
+  // Find matching campaign lead
+  const { data: rawLead } = await admin
+    .from("campaign_leads")
+    .select("id, campaign_id, campaigns!inner(first_message_template)")
+    .eq("prospect_unipile_id", prospectId)
+    .eq("status", "invite_sent")
+    .single();
+
+  if (!rawLead) return;
+
+  const lead = rawLead as unknown as {
+    id: string;
+    campaign_id: string;
+    campaigns: { first_message_template: string };
+  };
+
+  // Schedule first message with 5-30 min jitter
+  const jitterMs = (5 + Math.floor(Math.random() * 25)) * 60 * 1000;
+  const firstMessageAt = new Date(Date.now() + jitterMs).toISOString();
+
+  await admin.from("campaign_leads").update({
+    status: "connected",
+    connected_at: new Date().toISOString(),
+    first_message_scheduled_at: firstMessageAt,
+    // Store chat/account IDs for sending first message
+    ...(chatId ? { unipile_chat_id: chatId } : {}),
+    ...(accountId ? { unipile_account_id: accountId } : {}),
+  }).eq("id", lead.id);
 }
