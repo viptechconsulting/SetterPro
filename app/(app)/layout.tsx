@@ -3,6 +3,8 @@ import Link from "next/link";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { MembershipRow } from "@/types/database";
 
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL;
+
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -56,6 +58,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavItem href="/settings/accounts" icon="🔗" label="Cuentas LinkedIn" />
           <NavItem href="/settings/brain" icon="🧠" label="Cerebro IA" />
           <NavItem href="/settings/setter" icon="🤖" label="Setter" />
+          {SUPER_ADMIN_EMAIL && user?.email === SUPER_ADMIN_EMAIL && (
+            <>
+              <div className="pt-4 pb-1 px-2">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Admin</p>
+              </div>
+              <NavItem href="/admin" icon="📊" label="Telemetría" />
+            </>
+          )}
         </nav>
 
         <div className="px-4 py-4 border-t border-gray-800">
