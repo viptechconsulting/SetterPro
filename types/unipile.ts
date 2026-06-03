@@ -43,6 +43,16 @@ export interface UnipileWebhookPayload {
   timestamp?: string;
 }
 
+export interface UnipileMessage {
+  id: string;
+  chat_id: string;
+  account_id: string;
+  sender_id?: string;
+  is_sender: boolean;
+  text?: string;
+  timestamp?: string;
+}
+
 export interface UnipileError {
   error: string;
   message: string;

@@ -23,7 +23,8 @@ export async function GET() {
       .from("brains").select("id").eq("workspace_id", membership.workspace_id)
       .single();
 
-    return NextResponse.json({ setter: setter ?? null, brain_id: brain?.id ?? null });
+    const brainData = brain as { id: string } | null;
+    return NextResponse.json({ setter: setter ?? null, brain_id: brainData?.id ?? null });
   } catch (err) {
     console.error("[setter GET]", err);
     return NextResponse.json({ error: "Error interno" }, { status: 500 });
