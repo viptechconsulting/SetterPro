@@ -11,6 +11,7 @@ export function personalizeTemplate(template: string, lead: Partial<SearchResult
     .replace(/\{\{first_name\}\}/gi, firstName)
     .replace(/\{\{last_name\}\}/gi, lastName)
     .replace(/\{\{full_name\}\}/gi, fullName)
+    .replace(/\{\{company_name\}\}/gi, company)
     .replace(/\{\{company\}\}/gi, company)
     .replace(/\{\{headline\}\}/gi, headline)
     .trim();
