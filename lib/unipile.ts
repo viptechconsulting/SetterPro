@@ -204,6 +204,22 @@ export async function getChatMessages(
   }));
 }
 
+export async function getOrCreateChat(
+  accountId: string,
+  prospectProviderId: string
+): Promise<string> {
+  const res = await fetch(`${API_URL}/api/v1/chats`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      account_id: accountId,
+      attendees_ids: [prospectProviderId],
+    }),
+  });
+  const data = await handleResponse<{ id: string }>(res);
+  return data.id;
+}
+
 export async function sendMessage(
   accountId: string,
   chatId: string,

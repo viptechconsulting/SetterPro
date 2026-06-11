@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
-import { sendInvitation, sendMessage } from "@/lib/unipile";
+import { sendInvitation, sendMessage, getOrCreateChat } from "@/lib/unipile";
 import { personalizeTemplate } from "@/lib/campaigns/personalize";
 import type { CampaignLead } from "@/types/campaign";
 
@@ -120,7 +120,7 @@ export async function GET(req: NextRequest) {
   // ── 2. Process due first messages (post-connection) ───────────────────────
   const { data: connectedLeads } = await admin
     .from("campaign_leads")
-    .select("*, campaigns!inner(first_message_template, status)")
+    .select("*, campaigns!inner(first_message_template, status), linkedin_accounts(unipile_account_id)")
     .eq("status", "connected")
     .lte("first_message_scheduled_at", now)
     .not("first_message_scheduled_at", "is", null)
@@ -131,12 +131,13 @@ export async function GET(req: NextRequest) {
   for (const rawLead of (connectedLeads ?? [])) {
     const lead = rawLead as CampaignLead & {
       campaigns: { first_message_template: string; status: string };
-      unipile_chat_id?: string;
-      unipile_account_id?: string;
+      linkedin_accounts: { unipile_account_id: string } | null;
     };
 
     if (lead.campaigns.status !== "active") continue;
-    if (!lead.unipile_chat_id || !lead.unipile_account_id) continue;
+
+    const unipileAccountId = lead.linkedin_accounts?.unipile_account_id;
+    if (!unipileAccountId || !lead.prospect_unipile_id) continue;
 
     const message = personalizeTemplate(lead.campaigns.first_message_template, {
       first_name: lead.prospect_name?.split(" ")[0],
@@ -146,10 +147,12 @@ export async function GET(req: NextRequest) {
     });
 
     try {
-      await sendMessage(lead.unipile_account_id, lead.unipile_chat_id, message);
+      const chatId = await getOrCreateChat(unipileAccountId, lead.prospect_unipile_id);
+      await sendMessage(unipileAccountId, chatId, message);
       await admin.from("campaign_leads").update({
         status: "first_message_sent",
         first_message_sent_at: now,
+        unipile_chat_id: chatId,
       }).eq("id", lead.id);
       messagesSent++;
     } catch (err) {
