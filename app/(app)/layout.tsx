@@ -58,6 +58,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavItem href="/settings/accounts" icon="🔗" label="Cuentas LinkedIn" />
           <NavItem href="/settings/brain" icon="🧠" label="Cerebro IA" />
           <NavItem href="/settings/setter" icon="🤖" label="Setter" />
+          <div className="pt-4 pb-1 px-2">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Email AI
+            </p>
+          </div>
+          <NavItem href="/email-drafts" icon="📬" label="Drafts" />
+          <NavItem href="/email-policies" icon="📋" label="Políticas" />
           {SUPER_ADMIN_EMAIL && user?.email === SUPER_ADMIN_EMAIL && (
             <>
               <div className="pt-4 pb-1 px-2">
