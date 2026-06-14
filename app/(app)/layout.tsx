@@ -65,6 +65,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
           <NavItem href="/email-drafts" icon="📬" label="Drafts" />
           <NavItem href="/email-policies" icon="📋" label="Políticas" />
+          <NavItem href="/setup" icon="⚙️" label="Setup" />
           {SUPER_ADMIN_EMAIL && user?.email === SUPER_ADMIN_EMAIL && (
             <>
               <div className="pt-4 pb-1 px-2">
