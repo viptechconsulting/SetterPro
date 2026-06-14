@@ -227,38 +227,24 @@
     {
       "id": "aef1b234-0011-4011-8011-000000000011",
       "name": "Load Company Policies",
-      "type": "n8n-nodes-base.postgres",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1900, 160],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT policy_name, policy_text, category, priority FROM public.company_email_policies WHERE active = true ORDER BY priority ASC LIMIT 20",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "CONFIGURE_ME_PG",
-          "name": "Supabase PostgreSQL – VIP Tech"
-        }
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ── Load Company Policies via Supabase REST API ──────────\nconst BASE = 'https://rikxqupxukujqveeehaz.supabase.co';\nconst KEY  = $vars.SUPABASE_KEY;\n\nconst res = await fetch(\n  `${BASE}/rest/v1/company_email_policies?active=eq.true&order=priority.asc&limit=20&select=policy_name,policy_text,category,priority`,\n  { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } }\n);\n\nif (!res.ok) {\n  throw new Error(`Supabase policies error: ${res.status} ${await res.text()}`);\n}\n\nconst data = await res.json();\nif (!Array.isArray(data) || data.length === 0) {\n  return [{ json: { policy_name: 'Default', policy_text: 'Mantener tono profesional y proteger los intereses de VIP Tech Consulting.', category: 'general', priority: 1 } }];\n}\n\nreturn data.map(row => ({ json: row }));"
       }
     },
 
     {
       "id": "aef1b234-0012-4012-8012-000000000012",
       "name": "Load Relevant Lessons",
-      "type": "n8n-nodes-base.postgres",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [2120, 160],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "=SELECT lesson, situation_type, human_feedback FROM public.ai_email_feedback_lessons WHERE from_email = '{{ $('Summarize Thread').item.json.from_email }}' OR domain = '{{ $('Summarize Thread').item.json.domain }}' OR quickbooks_customer_id = '{{ $('Summarize Thread').item.json.quickbooks_customer_id }}' ORDER BY created_at DESC LIMIT 10",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "CONFIGURE_ME_PG",
-          "name": "Supabase PostgreSQL – VIP Tech"
-        }
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ── Load Relevant Lessons via Supabase REST API ──────────\nconst BASE = 'https://rikxqupxukujqveeehaz.supabase.co';\nconst KEY  = $vars.SUPABASE_KEY;\nconst ctx  = $('Summarize Thread').first().json;\n\nconst email  = ctx.from_email || '';\nconst domain = ctx.domain     || '';\nconst qbId   = ctx.quickbooks_customer_id || '';\n\n// Build OR filter for PostgREST\nconst orParts = [];\nif (email)  orParts.push(`from_email.eq.${email}`);\nif (domain) orParts.push(`domain.eq.${domain}`);\nif (qbId)   orParts.push(`quickbooks_customer_id.eq.${qbId}`);\n\nif (orParts.length === 0) {\n  return [{ json: { lesson: null, situation_type: null, human_feedback: null } }];\n}\n\nconst orParam = encodeURIComponent(`(${orParts.join(',')})`);\nconst url = `${BASE}/rest/v1/ai_email_feedback_lessons?or=${orParam}&order=created_at.desc&limit=10&select=lesson,situation_type,human_feedback`;\n\nconst res = await fetch(url, {\n  headers: { apikey: KEY, Authorization: `Bearer ${KEY}` }\n});\n\nif (!res.ok) {\n  // Don't fail the whole workflow if lessons can't be loaded\n  return [{ json: { lesson: null, situation_type: null, human_feedback: null } }];\n}\n\nconst data = await res.json();\nreturn data.length > 0\n  ? data.map(row => ({ json: row }))\n  : [{ json: { lesson: null, situation_type: null, human_feedback: null } }];"
       }
     },
 
@@ -270,7 +256,7 @@
       "position": [2340, 160],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// ── Assemble AI Prompt ───────────────────────────────────\n// Gather data from upstream nodes\nconst threadData   = $('Summarize Thread').first().json;\nconst policiesData = $('Load Company Policies').all();\nconst lessonsData  = $('Load Relevant Lessons').all();\n\n// Format policies\nconst policies = policiesData.map(p => {\n  const d = p.json;\n  return `- [${d.category?.toUpperCase()}] ${d.policy_name}: ${d.policy_text}`;\n}).join('\\n');\n\n// Format lessons\nconst lessons = lessonsData.length > 0\n  ? lessonsData.map(l => {\n      const d = l.json;\n      return `- Situación: ${d.situation_type || 'general'} → Lección: ${d.lesson}`;\n    }).join('\\n')\n  : 'Sin lecciones previas registradas para este cliente.';\n\n// Format customer data\nconst balanceWarning = threadData.balance > 0\n  ? `⚠️ BALANCE VENCIDO: $${threadData.balance}`\n  : 'Sin balance pendiente.';\n\nconst customerInfo = `\n- Nombre: ${threadData.customer_name || 'Desconocido'}\n- Empresa: ${threadData.company_name || 'No especificada'}\n- Email: ${threadData.from_email}\n- QB ID: ${threadData.quickbooks_customer_id || 'N/A'}\n- Estado cuenta: ${threadData.is_active ? 'Activo' : 'Inactivo'}\n- ${balanceWarning}\n- Notas internas: ${threadData.notes || 'Ninguna'}`;\n\n// System prompt\nconst systemPrompt = `Eres el asistente interno de VIP Tech Consulting, una empresa de tecnología y consultoría.\nTu trabajo es redactar respuestas profesionales a clientes, equilibrando excelente servicio con protección comercial.\n\nREGLAS CRÍTICAS:\n- No prometas descuentos, entregas, cambios fuera de scope ni responsabilidades no confirmadas.\n- No inventes información que no tengas disponible.\n- Si falta información crítica, propón una respuesta prudente que compre tiempo para investigar.\n- El email que generes es para revisión humana, NO para envío automático.\n- Responde siempre en español, tono profesional y cercano.\n- Tu respuesta DEBE ser JSON válido con exactamente los campos especificados.\n\nPOLÍTICAS INTERNAS DE LA EMPRESA:\n${policies}\n\nLECCIONES DE INTERACCIONES PREVIAS CON ESTE CLIENTE:\n${lessons}`;\n\n// User prompt\nconst userPrompt = `DATOS DEL CLIENTE:\n${customerInfo}\n\nEMAIL RECIBIDO:\nFecha: ${threadData.date}\nAsunto: ${threadData.subject}\n---\n${threadData.body}\n---\n\nHISTORIAL RESUMIDO DEL THREAD (últimos ${threadData.thread_msg_count} mensajes):\n${threadData.thread_summary || 'Sin historial previo en este thread.'}\n\nGENERA UN JSON con EXACTAMENTE esta estructura (sin texto fuera del JSON):\n{\n  \"case_summary\": \"Resumen breve y claro del caso en 2-3 oraciones\",\n  \"risk_level\": \"bajo|medio|alto\",\n  \"risk_reason\": \"Explicación breve del nivel de riesgo\",\n  \"suggested_reply_subject\": \"Re: ${threadData.subject}\",\n  \"suggested_reply_body\": \"El cuerpo completo del email de respuesta, listo para enviar\",\n  \"reasoning_for_human\": \"Explicación de por qué elegiste esta respuesta y qué consideraciones tuviste\",\n  \"human_review_notes\": [\n    \"Punto 1 que el humano debe verificar antes de enviar\",\n    \"Punto 2 que el humano debe verificar antes de enviar\"\n  ]\n}`;\n\nreturn [{\n  json: {\n    system_prompt: systemPrompt,\n    user_prompt:   userPrompt,\n    // pass through all context\n    ...threadData,\n    policies_loaded: policiesData.length,\n    lessons_loaded:  lessonsData.length\n  }\n}];"
+        "jsCode": "// ── Assemble AI Prompt ───────────────────────────────────\n// Gather data from upstream nodes\nconst threadData   = $('Summarize Thread').first().json;\nconst policiesData = $('Load Company Policies').all();\nconst lessonsData  = $('Load Relevant Lessons').all();\n\n// Format policies\nconst policies = policiesData.map(p => {\n  const d = p.json;\n  return `- [${(d.category || 'general').toUpperCase()}] ${d.policy_name}: ${d.policy_text}`;\n}).join('\\n');\n\n// Format lessons (filter out null placeholders)\nconst validLessons = lessonsData.filter(l => l.json && l.json.lesson);\nconst lessons = validLessons.length > 0\n  ? validLessons.map(l => {\n      const d = l.json;\n      return `- Situación: ${d.situation_type || 'general'} → Lección: ${d.lesson}`;\n    }).join('\\n')\n  : 'Sin lecciones previas registradas para este cliente.';\n\n// Format customer data\nconst balanceWarning = threadData.balance > 0\n  ? `⚠️ BALANCE VENCIDO: $${threadData.balance}`\n  : 'Sin balance pendiente.';\n\nconst customerInfo = `\n- Nombre: ${threadData.customer_name || 'Desconocido'}\n- Empresa: ${threadData.company_name || 'No especificada'}\n- Email: ${threadData.from_email}\n- QB ID: ${threadData.quickbooks_customer_id || 'N/A'}\n- Estado cuenta: ${threadData.is_active ? 'Activo' : 'Inactivo'}\n- ${balanceWarning}\n- Notas internas: ${threadData.notes || 'Ninguna'}`;\n\n// System prompt\nconst systemPrompt = `Eres el asistente interno de VIP Tech Consulting, una empresa de tecnología y consultoría.\nTu trabajo es redactar respuestas profesionales a clientes, equilibrando excelente servicio con protección comercial.\n\nREGLAS CRÍTICAS:\n- No prometas descuentos, entregas, cambios fuera de scope ni responsabilidades no confirmadas.\n- No inventes información que no tengas disponible.\n- Si falta información crítica, propón una respuesta prudente que compre tiempo para investigar.\n- El email que generes es para revisión humana, NO para envío automático.\n- Responde siempre en español, tono profesional y cercano.\n- Tu respuesta DEBE ser JSON válido con exactamente los campos especificados.\n\nPOLÍTICAS INTERNAS DE LA EMPRESA:\n${policies}\n\nLECCIONES DE INTERACCIONES PREVIAS CON ESTE CLIENTE:\n${lessons}`;\n\n// User prompt\nconst userPrompt = `DATOS DEL CLIENTE:\n${customerInfo}\n\nEMAIL RECIBIDO:\nFecha: ${threadData.date}\nAsunto: ${threadData.subject}\n---\n${threadData.body}\n---\n\nHISTORIAL RESUMIDO DEL THREAD (últimos ${threadData.thread_msg_count} mensajes):\n${threadData.thread_summary || 'Sin historial previo en este thread.'}\n\nGENERA UN JSON con EXACTAMENTE esta estructura (sin texto fuera del JSON):\n{\n  \"case_summary\": \"Resumen breve y claro del caso en 2-3 oraciones\",\n  \"risk_level\": \"bajo|medio|alto\",\n  \"risk_reason\": \"Explicación breve del nivel de riesgo\",\n  \"suggested_reply_subject\": \"Re: ${threadData.subject}\",\n  \"suggested_reply_body\": \"El cuerpo completo del email de respuesta, listo para enviar\",\n  \"reasoning_for_human\": \"Explicación de por qué elegiste esta respuesta y qué consideraciones tuviste\",\n  \"human_review_notes\": [\n    \"Punto 1 que el humano debe verificar antes de enviar\",\n    \"Punto 2 que el humano debe verificar antes de enviar\"\n  ]\n}`;\n\nreturn [{\n  json: {\n    system_prompt: systemPrompt,\n    user_prompt:   userPrompt,\n    // pass through all context\n    ...threadData,\n    policies_loaded: policiesData.length,\n    lessons_loaded:  validLessons.length\n  }\n}];"
       }
     },
 
@@ -387,19 +373,12 @@
     {
       "id": "aef1b234-0019-4019-8019-000000000019",
       "name": "Save Draft to Database",
-      "type": "n8n-nodes-base.postgres",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [3660, 160],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "=INSERT INTO public.ai_email_drafts (\n  message_id, thread_id, draft_id, quickbooks_customer_id,\n  from_email, customer_name, company_name,\n  original_subject, original_body,\n  ai_case_summary, ai_risk_level, ai_suggested_reply,\n  ai_suggested_subject, reasoning_for_human, human_review_notes,\n  status, created_at\n) VALUES (\n  '{{ $json.message_id }}',\n  '{{ $json.thread_id }}',\n  '{{ $json.draft_id }}',\n  '{{ $json.quickbooks_customer_id }}',\n  '{{ $json.from_email }}',\n  {{ $json.customer_name ? \"'\" + $json.customer_name.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  {{ $json.company_name  ? \"'\" + $json.company_name.replace(/'/g, \"''\")  + \"'\" : 'NULL' }},\n  {{ $json.subject       ? \"'\" + $json.subject.replace(/'/g, \"''\")       + \"'\" : 'NULL' }},\n  {{ $json.body          ? \"'\" + $json.body.replace(/'/g, \"''\").substring(0,8000) + \"'\" : 'NULL' }},\n  {{ $json.case_summary  ? \"'\" + $json.case_summary.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  '{{ $json.risk_level }}',\n  {{ $json.suggested_reply_body ? \"'\" + $json.suggested_reply_body.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  {{ $json.suggested_reply_subject ? \"'\" + $json.suggested_reply_subject.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  {{ $json.reasoning_for_human ? \"'\" + $json.reasoning_for_human.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  '{{ JSON.stringify($json.human_review_notes || []) }}'::jsonb,\n  'pending_review',\n  NOW()\n)\nON CONFLICT (message_id) DO UPDATE SET\n  draft_id   = EXCLUDED.draft_id,\n  status     = EXCLUDED.status,\n  updated_at = NOW()\nRETURNING id, draft_id, status",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "CONFIGURE_ME_PG",
-          "name": "Supabase PostgreSQL – VIP Tech"
-        }
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Save Draft to Supabase via REST API ──────────────────\nconst BASE = 'https://rikxqupxukujqveeehaz.supabase.co';\nconst KEY  = $vars.SUPABASE_KEY;\nconst d    = $input.item.json;\n\nconst body = {\n  message_id:             d.message_id,\n  thread_id:              d.thread_id      || null,\n  draft_id:               d.draft_id       || null,\n  quickbooks_customer_id: d.quickbooks_customer_id || null,\n  from_email:             d.from_email,\n  customer_name:          d.customer_name  || null,\n  company_name:           d.company_name   || null,\n  original_subject:       d.subject        || null,\n  original_body:          (d.body || '').substring(0, 8000),\n  ai_case_summary:        d.case_summary   || null,\n  ai_risk_level:          d.risk_level     || 'medio',\n  ai_suggested_reply:     d.suggested_reply_body    || null,\n  ai_suggested_subject:   d.suggested_reply_subject || null,\n  reasoning_for_human:    d.reasoning_for_human     || null,\n  human_review_notes:     d.human_review_notes      || [],\n  status:                 'pending_review'\n};\n\nconst res = await fetch(\n  `${BASE}/rest/v1/ai_email_drafts`,\n  {\n    method: 'POST',\n    headers: {\n      apikey: KEY,\n      Authorization: `Bearer ${KEY}`,\n      'Content-Type': 'application/json',\n      Prefer: 'resolution=merge-duplicates,return=representation'\n    },\n    body: JSON.stringify(body)\n  }\n);\n\nif (!res.ok) {\n  const err = await res.text();\n  throw new Error(`Supabase upsert error: ${res.status} ${err}`);\n}\n\nconst data = await res.json();\nconst row  = Array.isArray(data) ? data[0] : data;\nreturn { json: { id: row?.id, draft_id: row?.draft_id || d.draft_id, status: row?.status || 'pending_review' } };"
       }
     },
 
@@ -428,19 +407,12 @@
     {
       "id": "aef1b234-0021-4021-8021-000000000021",
       "name": "Log Error",
-      "type": "n8n-nodes-base.postgres",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [4100, 400],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "=INSERT INTO public.email_processing_log (message_id, event_type, event_data, error_msg)\nVALUES ('{{ $json.message_id || \"unknown\" }}', 'processing_error', '{}'::jsonb, '{{ $json.error?.message || \"Unknown error\" }}')",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "CONFIGURE_ME_PG",
-          "name": "Supabase PostgreSQL – VIP Tech"
-        }
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Log Error to Supabase via REST API ───────────────────\nconst BASE = 'https://rikxqupxukujqveeehaz.supabase.co';\nconst KEY  = $vars.SUPABASE_KEY;\nconst d    = $input.item.json;\n\ntry {\n  await fetch(\n    `${BASE}/rest/v1/email_processing_log`,\n    {\n      method: 'POST',\n      headers: {\n        apikey: KEY,\n        Authorization: `Bearer ${KEY}`,\n        'Content-Type': 'application/json'\n      },\n      body: JSON.stringify({\n        message_id: d.message_id || 'unknown',\n        event_type: 'processing_error',\n        event_data: {},\n        error_msg:  d.error?.message || String(d.error) || 'Unknown error'\n      })\n    }\n  );\n} catch(e) {\n  // silently ignore logging errors\n}\nreturn { json: { logged: true } };"
       }
     }
   ],
@@ -542,7 +514,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "errorWorkflow": ""
   },
-  "versionId": "vip-tech-main-v1",
+  "versionId": "vip-tech-main-v2",
   "meta": {
     "templateCredsSetupCompleted": false,
     "instanceId": "vip-tech-consulting"

@@ -141,38 +141,24 @@
     {
       "id": "bef2c345-0006-4006-8006-000000000006",
       "name": "DB – Get Draft (APPROVE)",
-      "type": "n8n-nodes-base.postgres",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1020, 240],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "=SELECT * FROM public.ai_email_drafts WHERE draft_id = '{{ $json.draft_id }}' LIMIT 1",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "CONFIGURE_ME_PG",
-          "name": "Supabase PostgreSQL – VIP Tech"
-        }
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Get Draft from Supabase via REST API ─────────────────\nconst BASE    = 'https://rikxqupxukujqveeehaz.supabase.co';\nconst KEY     = $vars.SUPABASE_KEY;\nconst draftId = $input.item.json.draft_id;\n\nconst res  = await fetch(\n  `${BASE}/rest/v1/ai_email_drafts?draft_id=eq.${encodeURIComponent(draftId)}&limit=1`,\n  { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } }\n);\n\nif (!res.ok) throw new Error(`Supabase error: ${res.status}`);\n\nconst data = await res.json();\nconst row  = Array.isArray(data) ? data[0] : data;\nreturn { json: row || { error: 'Draft not found', draft_id: draftId } };"
       }
     },
 
     {
       "id": "bef2c345-0007-4007-8007-000000000007",
       "name": "DB – Approve Draft",
-      "type": "n8n-nodes-base.postgres",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1240, 240],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "=UPDATE public.ai_email_drafts\nSET status = 'approved',\n    approved_by = '{{ $('Parse Telegram Command').item.json.from_user }}',\n    approved_at = NOW(),\n    updated_at  = NOW()\nWHERE draft_id = '{{ $('Parse Telegram Command').item.json.draft_id }}'\nRETURNING id, draft_id, from_email, customer_name, original_subject, status",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "CONFIGURE_ME_PG",
-          "name": "Supabase PostgreSQL – VIP Tech"
-        }
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Approve Draft in Supabase via REST API ───────────────\nconst BASE    = 'https://rikxqupxukujqveeehaz.supabase.co';\nconst KEY     = $vars.SUPABASE_KEY;\nconst cmdData = $('Parse Telegram Command').first().json;\n\nconst res = await fetch(\n  `${BASE}/rest/v1/ai_email_drafts?draft_id=eq.${encodeURIComponent(cmdData.draft_id)}`,\n  {\n    method: 'PATCH',\n    headers: {\n      apikey: KEY,\n      Authorization: `Bearer ${KEY}`,\n      'Content-Type': 'application/json',\n      Prefer: 'return=representation'\n    },\n    body: JSON.stringify({\n      status:      'approved',\n      approved_by: cmdData.from_user,\n      approved_at: new Date().toISOString()\n    })\n  }\n);\n\nif (!res.ok) throw new Error(`Supabase approve error: ${res.status}`);\n\nconst data = await res.json();\nconst row  = Array.isArray(data) ? data[0] : data;\nreturn { json: row || $('DB – Get Draft (APPROVE)').first().json };"
       }
     },
 
@@ -200,19 +186,12 @@
     {
       "id": "bef2c345-0009-4009-8009-000000000009",
       "name": "DB – Get Draft (EDIT)",
-      "type": "n8n-nodes-base.postgres",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1020, 400],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "=SELECT * FROM public.ai_email_drafts WHERE draft_id = '{{ $json.draft_id }}' LIMIT 1",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "CONFIGURE_ME_PG",
-          "name": "Supabase PostgreSQL – VIP Tech"
-        }
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Get Draft from Supabase via REST API ─────────────────\nconst BASE    = 'https://rikxqupxukujqveeehaz.supabase.co';\nconst KEY     = $vars.SUPABASE_KEY;\nconst draftId = $input.item.json.draft_id;\n\nconst res  = await fetch(\n  `${BASE}/rest/v1/ai_email_drafts?draft_id=eq.${encodeURIComponent(draftId)}&limit=1`,\n  { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } }\n);\n\nif (!res.ok) throw new Error(`Supabase error: ${res.status}`);\n\nconst data = await res.json();\nconst row  = Array.isArray(data) ? data[0] : data;\nreturn { json: row || { error: 'Draft not found', draft_id: draftId } };"
       }
     },
 
@@ -357,19 +336,12 @@
     {
       "id": "bef2c345-0015-4015-8015-000000000015",
       "name": "DB – Save Edit Feedback + Lesson",
-      "type": "n8n-nodes-base.postgres",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [2340, 400],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "=-- Update draft record\nUPDATE public.ai_email_drafts\nSET status         = 'edited',\n    human_feedback  = '{{ $('Parse Revised Draft').item.json.human_feedback.replace(/'/g, \"''\") }}',\n    draft_id        = '{{ $('Create Revised Gmail Draft').item.json.id || $('Create Revised Gmail Draft').item.json.message?.id }}',\n    updated_at      = NOW()\nWHERE draft_id = '{{ $('Parse Revised Draft').item.json.draft_id }}';\n\n-- Insert lesson\nINSERT INTO public.ai_email_feedback_lessons (\n  draft_id, quickbooks_customer_id, from_email, domain,\n  situation_type, original_ai_reply, human_feedback, revised_reply, lesson\n)\nSELECT\n  '{{ $('Parse Revised Draft').item.json.draft_id }}',\n  qb.quickbooks_customer_id,\n  '{{ $('Parse Revised Draft').item.json.from_email }}',\n  split_part('{{ $('Parse Revised Draft').item.json.from_email }}', '@', 2),\n  '{{ ($input.item.json.message?.content ? JSON.parse($input.item.json.message.content).situation_type : 'general') }}',\n  '{{ $('Parse Revised Draft').item.json.original_ai_reply.replace(/'/g, \"''\").substring(0, 2000) }}',\n  '{{ $('Parse Revised Draft').item.json.human_feedback.replace(/'/g, \"''\") }}',\n  '{{ $('Parse Revised Draft').item.json.revised_body.replace(/'/g, \"''\").substring(0, 2000) }}',\n  '{{ ($input.item.json.message?.content ? JSON.parse($input.item.json.message.content).lesson : 'Revisar respuesta según feedback del equipo') }}'\nFROM (SELECT quickbooks_customer_id FROM public.ai_email_drafts WHERE draft_id = '{{ $('Parse Revised Draft').item.json.draft_id }}' LIMIT 1) qb",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "CONFIGURE_ME_PG",
-          "name": "Supabase PostgreSQL – VIP Tech"
-        }
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ── Save Edit Feedback + Lesson to Supabase via REST API ─\nconst BASE    = 'https://rikxqupxukujqveeehaz.supabase.co';\nconst KEY     = $vars.SUPABASE_KEY;\nconst revised = $('Parse Revised Draft').first().json;\nconst newDraftId = $('Create Revised Gmail Draft').first().json.id ||\n                   $('Create Revised Gmail Draft').first().json.message?.id ||\n                   revised.draft_id;\n\n// Parse OpenAI lesson response\nlet lessonData;\ntry {\n  const rawLesson = $input.first().json.message?.content ||\n                    $input.first().json.choices?.[0]?.message?.content || '{}';\n  lessonData = JSON.parse(rawLesson);\n} catch(e) {\n  lessonData = { lesson: 'Revisar respuesta según feedback del equipo', situation_type: 'general' };\n}\n\nconst headers = {\n  apikey: KEY,\n  Authorization: `Bearer ${KEY}`,\n  'Content-Type': 'application/json'\n};\n\n// 1. Update draft record (new draft_id + status = edited)\nawait fetch(\n  `${BASE}/rest/v1/ai_email_drafts?draft_id=eq.${encodeURIComponent(revised.draft_id)}`,\n  {\n    method: 'PATCH',\n    headers,\n    body: JSON.stringify({\n      status:         'edited',\n      human_feedback: revised.human_feedback,\n      draft_id:       newDraftId\n    })\n  }\n);\n\n// 2. Get QB customer ID for the draft\nconst draftRes = await fetch(\n  `${BASE}/rest/v1/ai_email_drafts?draft_id=eq.${encodeURIComponent(newDraftId)}&select=quickbooks_customer_id&limit=1`,\n  { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } }\n);\nconst draftData = await draftRes.json();\nconst qbId = (Array.isArray(draftData) ? draftData[0] : draftData)?.quickbooks_customer_id || null;\n\n// 3. Insert lesson record\nconst fromEmail = revised.from_email || '';\nconst domain    = fromEmail.includes('@') ? fromEmail.split('@')[1] : '';\n\nawait fetch(\n  `${BASE}/rest/v1/ai_email_feedback_lessons`,\n  {\n    method: 'POST',\n    headers,\n    body: JSON.stringify({\n      draft_id:               revised.draft_id,\n      quickbooks_customer_id: qbId,\n      from_email:             fromEmail,\n      domain:                 domain,\n      situation_type:         lessonData.situation_type || 'general',\n      original_ai_reply:      (revised.original_ai_reply || '').substring(0, 2000),\n      human_feedback:         revised.human_feedback,\n      revised_reply:          (revised.revised_body || '').substring(0, 2000),\n      lesson:                 lessonData.lesson || 'Revisar respuesta según feedback'\n    })\n  }\n);\n\nreturn [{ json: { saved: true, new_draft_id: newDraftId } }];"
       }
     },
 
@@ -397,19 +369,12 @@
     {
       "id": "bef2c345-0017-4017-8017-000000000017",
       "name": "DB – Get Draft (REJECT)",
-      "type": "n8n-nodes-base.postgres",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1020, 580],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "=SELECT * FROM public.ai_email_drafts WHERE draft_id = '{{ $json.draft_id }}' LIMIT 1",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "CONFIGURE_ME_PG",
-          "name": "Supabase PostgreSQL – VIP Tech"
-        }
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Get Draft from Supabase via REST API ─────────────────\nconst BASE    = 'https://rikxqupxukujqveeehaz.supabase.co';\nconst KEY     = $vars.SUPABASE_KEY;\nconst draftId = $input.item.json.draft_id;\n\nconst res  = await fetch(\n  `${BASE}/rest/v1/ai_email_drafts?draft_id=eq.${encodeURIComponent(draftId)}&limit=1`,\n  { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } }\n);\n\nif (!res.ok) throw new Error(`Supabase error: ${res.status}`);\n\nconst data = await res.json();\nconst row  = Array.isArray(data) ? data[0] : data;\nreturn { json: row || { error: 'Draft not found', draft_id: draftId } };"
       }
     },
 
@@ -457,19 +422,12 @@
     {
       "id": "bef2c345-0019-4019-8019-000000000019",
       "name": "DB – Save Rejection + Lesson",
-      "type": "n8n-nodes-base.postgres",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1460, 580],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "=UPDATE public.ai_email_drafts\nSET status           = 'rejected',\n    rejection_reason  = '{{ $('Parse Telegram Command').item.json.reason.replace(/'/g, \"''\") }}',\n    updated_at        = NOW()\nWHERE draft_id = '{{ $('Parse Telegram Command').item.json.draft_id }}';\n\nINSERT INTO public.ai_email_feedback_lessons (\n  draft_id, quickbooks_customer_id, from_email, domain,\n  situation_type, original_ai_reply, human_feedback, lesson\n)\nSELECT\n  '{{ $('Parse Telegram Command').item.json.draft_id }}',\n  quickbooks_customer_id,\n  from_email,\n  split_part(from_email, '@', 2),\n  '{{ ($input.item.json.message?.content ? JSON.parse($input.item.json.message.content).situation_type : 'general') }}',\n  '{{ $('DB – Get Draft (REJECT)').item.json.ai_suggested_reply.replace(/'/g, \"''\").substring(0,2000) }}',\n  '{{ $('Parse Telegram Command').item.json.reason.replace(/'/g, \"''\") }}',\n  '{{ ($input.item.json.message?.content ? JSON.parse($input.item.json.message.content).lesson : 'Draft rechazado. Revisar criterios de generación') }}'\nFROM public.ai_email_drafts\nWHERE draft_id = '{{ $('Parse Telegram Command').item.json.draft_id }}'",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "CONFIGURE_ME_PG",
-          "name": "Supabase PostgreSQL – VIP Tech"
-        }
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ── Save Rejection + Lesson to Supabase via REST API ─────\nconst BASE      = 'https://rikxqupxukujqveeehaz.supabase.co';\nconst KEY       = $vars.SUPABASE_KEY;\nconst cmdData   = $('Parse Telegram Command').first().json;\nconst draftData = $('DB – Get Draft (REJECT)').first().json;\n\n// Parse OpenAI lesson response\nlet lessonData;\ntry {\n  const rawLesson = $input.first().json.message?.content ||\n                    $input.first().json.choices?.[0]?.message?.content || '{}';\n  lessonData = JSON.parse(rawLesson);\n} catch(e) {\n  lessonData = { lesson: 'Draft rechazado. Revisar criterios de generación', situation_type: 'general' };\n}\n\nconst headers = {\n  apikey: KEY,\n  Authorization: `Bearer ${KEY}`,\n  'Content-Type': 'application/json'\n};\n\n// 1. Update draft status to rejected\nawait fetch(\n  `${BASE}/rest/v1/ai_email_drafts?draft_id=eq.${encodeURIComponent(cmdData.draft_id)}`,\n  {\n    method: 'PATCH',\n    headers,\n    body: JSON.stringify({\n      status:           'rejected',\n      rejection_reason: cmdData.reason\n    })\n  }\n);\n\n// 2. Insert rejection lesson\nconst fromEmail = draftData.from_email || '';\nconst domain    = fromEmail.includes('@') ? fromEmail.split('@')[1] : '';\n\nawait fetch(\n  `${BASE}/rest/v1/ai_email_feedback_lessons`,\n  {\n    method: 'POST',\n    headers,\n    body: JSON.stringify({\n      draft_id:               cmdData.draft_id,\n      quickbooks_customer_id: draftData.quickbooks_customer_id || null,\n      from_email:             fromEmail,\n      domain:                 domain,\n      situation_type:         lessonData.situation_type || 'general',\n      original_ai_reply:      (draftData.ai_suggested_reply || '').substring(0, 2000),\n      human_feedback:         cmdData.reason,\n      lesson:                 lessonData.lesson || 'Draft rechazado. Revisar criterios'\n    })\n  }\n);\n\nreturn [{ json: { saved: true } }];"
       }
     },
 
@@ -587,7 +545,7 @@
     "saveManualExecutions": true,
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "versionId": "vip-tech-telegram-v1",
+  "versionId": "vip-tech-telegram-v2",
   "meta": {
     "templateCredsSetupCompleted": false,
     "instanceId": "vip-tech-consulting"
