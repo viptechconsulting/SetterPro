@@ -1,0 +1,556 @@
+{
+  "name": "VIP Client Email Draft Assistant",
+  "nodes": [
+    {
+      "id": "aef1b234-0001-4001-8001-000000000001",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [140, 400],
+      "webhookId": "vip-gmail-trigger-001",
+      "parameters": {
+        "pollTimes": {
+          "item": [{"mode": "everyMinute"}]
+        },
+        "simple": true,
+        "filters": {
+          "labelIds": ["INBOX"],
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CONFIGURE_ME_GMAIL",
+          "name": "Gmail OAuth2 – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0002-4002-8002-000000000002",
+      "name": "Normalize Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [360, 400],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Normalize Email ──────────────────────────────────────\nconst item = $input.item.json;\n\n// Extract raw fields from Gmail Trigger output\nconst rawFrom   = item.from   || '';\nconst subject   = item.subject || '(Sin asunto)';\nconst bodyHtml  = item.html   || '';\nconst bodyText  = item.text   || '';\nconst threadId  = item.threadId || item.id || '';\nconst messageId = item.id    || '';\nconst date      = item.date  || new Date().toISOString();\nconst snippet   = item.snippet || '';\n\n// Parse \"Name <email>\" format\nconst emailMatch = rawFrom.match(/<([^>]+)>/);\nconst fromEmail  = (emailMatch ? emailMatch[1] : rawFrom).toLowerCase().trim();\nconst fromName   = rawFrom.replace(/<[^>]+>/, '').replace(/\"/g, '').trim();\n\n// Extract domain\nconst domain = fromEmail.includes('@') ? fromEmail.split('@')[1].toLowerCase() : '';\n\n// Strip HTML to plain text\nfunction stripHtml(html) {\n  if (!html) return '';\n  return html\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<br\\s*\\/?>/gi, '\\n')\n    .replace(/<\\/p>/gi, '\\n')\n    .replace(/<\\/div>/gi, '\\n')\n    .replace(/<[^>]+>/g, '')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\nconst body = (bodyText || stripHtml(bodyHtml)).substring(0, 8000);\n\n// ── Detect automated / non-human emails ──────────────────\nconst AUTOMATED_EMAIL_PATTERNS = [\n  /^(no-?reply|noreply|donotreply|do-not-reply|mailer-daemon|postmaster|bounce|auto-?mail)/i,\n  /^(notifications?|alerts?|newsletter|digest|unsubscribe|marketing|news)@/i,\n  /^(info|hello|support|help)@(mailchimp|constantcontact|sendgrid|hubspot)/i\n];\n\nconst AUTOMATED_SUBJECT_PATTERNS = [\n  /^(out of office|automatic reply|auto-?reply|delivery status|undelivered mail|mailer-daemon|receipt|order confirmation|your (order|receipt|invoice|subscription))/i,\n  /^\\[?(spam|bulk|junk)\\]?/i\n];\n\nconst AUTOMATED_DOMAINS = [\n  'mailchimp.com', 'constantcontact.com', 'sendgrid.net', 'amazonses.com',\n  'bounce.', 'mailgun.org', 'postmarkapp.com', 'sparkpostmail.com',\n  'mandrillapp.com', 'exacttarget.com', 'salesforce.com', 'marketo.com',\n  'hubspotemail.net'\n];\n\nconst isAutomatedByEmail   = AUTOMATED_EMAIL_PATTERNS.some(p => p.test(fromEmail));\nconst isAutomatedBySubject = AUTOMATED_SUBJECT_PATTERNS.some(p => p.test(subject));\nconst isAutomatedByDomain  = AUTOMATED_DOMAINS.some(d => domain.includes(d));\nconst isAutomatedByHeader  = body.toLowerCase().includes('x-mailer:') ||\n                             body.toLowerCase().includes('list-unsubscribe');\n\nconst isAutomated = isAutomatedByEmail || isAutomatedBySubject ||\n                    isAutomatedByDomain || isAutomatedByHeader;\n\n// ── Return normalized object ──────────────────────────────\nreturn {\n  from_email:   fromEmail,\n  from_name:    fromName,\n  domain:       domain,\n  subject:      subject,\n  body:         body,\n  body_html:    bodyHtml.substring(0, 16000),\n  thread_id:    threadId,\n  message_id:   messageId,\n  date:         date,\n  snippet:      snippet,\n  is_automated: isAutomated,\n  raw_from:     rawFrom\n};"
+      }
+    },
+
+    {
+      "id": "aef1b234-0003-4003-8003-000000000003",
+      "name": "Is Human Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [580, 400],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-is-human",
+              "leftValue": "={{ $json.is_automated }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+
+    {
+      "id": "aef1b234-0004-4004-8004-000000000004",
+      "name": "Stop – Automated Email",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [580, 600],
+      "parameters": {}
+    },
+
+    {
+      "id": "aef1b234-0005-4005-8005-000000000005",
+      "name": "Search Customer in QuickBooks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://quickbooks.api.intuit.com/v3/company/{{ $vars.QB_REALM_ID }}/query",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "=SELECT * FROM Customer WHERE PrimaryEmailAddr = '{{ $json.from_email }}' MAXRESULTS 5"
+            },
+            {
+              "name": "minorversion",
+              "value": "65"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "CONFIGURE_ME_QB",
+          "name": "QuickBooks OAuth2 – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0006-4006-8006-000000000006",
+      "name": "Extract Customer Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1020, 300],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Extract QuickBooks Customer Data ─────────────────────\nconst qbResponse  = $input.item.json;\nconst emailData   = $('Normalize Email').item.json;\n\nconst queryResponse = qbResponse.QueryResponse || {};\nconst customers     = queryResponse.Customer   || [];\n\nif (customers.length === 0) {\n  return {\n    customer_found: false,\n    from_email:     emailData.from_email,\n    from_name:      emailData.from_name,\n    domain:         emailData.domain,\n    subject:        emailData.subject,\n    body:           emailData.body,\n    thread_id:      emailData.thread_id,\n    message_id:     emailData.message_id,\n    date:           emailData.date\n  };\n}\n\nconst c = customers[0];\n\nreturn {\n  customer_found:          true,\n  quickbooks_customer_id:  String(c.Id || ''),\n  customer_name:           c.DisplayName || c.FullyQualifiedName || emailData.from_name,\n  company_name:            c.CompanyName || '',\n  customer_email:          (c.PrimaryEmailAddr && c.PrimaryEmailAddr.Address) || emailData.from_email,\n  customer_phone:          (c.PrimaryPhone && c.PrimaryPhone.FreeFormNumber) || '',\n  balance:                 c.Balance != null ? c.Balance : 0,\n  balance_with_jobs:       c.BalanceWithJobs != null ? c.BalanceWithJobs : 0,\n  is_active:               c.Active !== false,\n  notes:                   c.Notes || '',\n  // pass through email data\n  from_email:              emailData.from_email,\n  from_name:               emailData.from_name,\n  domain:                  emailData.domain,\n  subject:                 emailData.subject,\n  body:                    emailData.body,\n  thread_id:               emailData.thread_id,\n  message_id:              emailData.message_id,\n  date:                    emailData.date\n};"
+      }
+    },
+
+    {
+      "id": "aef1b234-0007-4007-8007-000000000007",
+      "name": "Customer Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1240, 300],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-customer-found",
+              "leftValue": "={{ $json.customer_found }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+
+    {
+      "id": "aef1b234-0008-4008-8008-000000000008",
+      "name": "Telegram – Unknown Contact Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1460, 460],
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ *Email de contacto NO registrado en QuickBooks*\n\n📧 *De:* {{ $json.from_name }} \\<{{ $json.from_email }}\\>\n📋 *Asunto:* {{ $json.subject }}\n🌐 *Dominio:* {{ $json.domain }}\n📅 *Fecha:* {{ $json.date }}\n\n💬 *Extracto:*\n{{ $json.body.substring(0, 300) }}...\n\n_Este contacto no está en QuickBooks. Revisar manualmente._",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_notification": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "CONFIGURE_ME_TELEGRAM",
+          "name": "Telegram Bot – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0009-4009-8009-000000000009",
+      "name": "Get Gmail Thread History",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1460, 160],
+      "parameters": {
+        "resource": "thread",
+        "operation": "get",
+        "threadId": "={{ $json.thread_id }}",
+        "simple": false,
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CONFIGURE_ME_GMAIL",
+          "name": "Gmail OAuth2 – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0010-4010-8010-000000000010",
+      "name": "Summarize Thread",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 160],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Summarize Gmail Thread ───────────────────────────────\nconst threadData   = $input.item.json;\nconst customerData = $('Extract Customer Data').item.json;\n\nfunction decodeBase64(str) {\n  try {\n    return Buffer.from(str.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');\n  } catch(e) {\n    return '';\n  }\n}\n\nfunction stripHtml(html) {\n  if (!html) return '';\n  return html\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/\\s{2,}/g, ' ')\n    .trim();\n}\n\nfunction extractBody(payload) {\n  if (!payload) return '';\n  const parts = payload.parts || [];\n  if (payload.body && payload.body.data) {\n    return decodeBase64(payload.body.data);\n  }\n  for (const part of parts) {\n    if (part.mimeType === 'text/plain' && part.body && part.body.data) {\n      return decodeBase64(part.body.data);\n    }\n  }\n  for (const part of parts) {\n    if (part.mimeType === 'text/html' && part.body && part.body.data) {\n      return stripHtml(decodeBase64(part.body.data));\n    }\n  }\n  return '';\n}\n\nfunction getHeader(headers, name) {\n  const h = (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase());\n  return h ? h.value : '';\n}\n\nconst messages = (threadData.messages || []).slice(-20);\n\nconst summaryItems = messages.map((msg, idx) => {\n  const headers = (msg.payload && msg.payload.headers) || [];\n  const from    = getHeader(headers, 'From');\n  const date    = getHeader(headers, 'Date');\n  const subj    = getHeader(headers, 'Subject');\n  const body    = extractBody(msg.payload).substring(0, 600);\n  return `[${idx + 1}] De: ${from} | Fecha: ${date}\\nAsunto: ${subj}\\n${body}\\n`;\n});\n\nconst threadSummary = summaryItems.join('\\n---\\n').substring(0, 6000);\n\nreturn {\n  ...customerData,\n  thread_summary:   threadSummary,\n  thread_msg_count: messages.length\n};"
+      }
+    },
+
+    {
+      "id": "aef1b234-0011-4011-8011-000000000011",
+      "name": "Load Company Policies",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1900, 160],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT policy_name, policy_text, category, priority FROM public.company_email_policies WHERE active = true ORDER BY priority ASC LIMIT 20",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_ME_PG",
+          "name": "Supabase PostgreSQL – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0012-4012-8012-000000000012",
+      "name": "Load Relevant Lessons",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2120, 160],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT lesson, situation_type, human_feedback FROM public.ai_email_feedback_lessons WHERE from_email = '{{ $('Summarize Thread').item.json.from_email }}' OR domain = '{{ $('Summarize Thread').item.json.domain }}' OR quickbooks_customer_id = '{{ $('Summarize Thread').item.json.quickbooks_customer_id }}' ORDER BY created_at DESC LIMIT 10",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_ME_PG",
+          "name": "Supabase PostgreSQL – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0013-4013-8013-000000000013",
+      "name": "Assemble AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2340, 160],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ── Assemble AI Prompt ───────────────────────────────────\n// Gather data from upstream nodes\nconst threadData   = $('Summarize Thread').first().json;\nconst policiesData = $('Load Company Policies').all();\nconst lessonsData  = $('Load Relevant Lessons').all();\n\n// Format policies\nconst policies = policiesData.map(p => {\n  const d = p.json;\n  return `- [${d.category?.toUpperCase()}] ${d.policy_name}: ${d.policy_text}`;\n}).join('\\n');\n\n// Format lessons\nconst lessons = lessonsData.length > 0\n  ? lessonsData.map(l => {\n      const d = l.json;\n      return `- Situación: ${d.situation_type || 'general'} → Lección: ${d.lesson}`;\n    }).join('\\n')\n  : 'Sin lecciones previas registradas para este cliente.';\n\n// Format customer data\nconst balanceWarning = threadData.balance > 0\n  ? `⚠️ BALANCE VENCIDO: $${threadData.balance}`\n  : 'Sin balance pendiente.';\n\nconst customerInfo = `\n- Nombre: ${threadData.customer_name || 'Desconocido'}\n- Empresa: ${threadData.company_name || 'No especificada'}\n- Email: ${threadData.from_email}\n- QB ID: ${threadData.quickbooks_customer_id || 'N/A'}\n- Estado cuenta: ${threadData.is_active ? 'Activo' : 'Inactivo'}\n- ${balanceWarning}\n- Notas internas: ${threadData.notes || 'Ninguna'}`;\n\n// System prompt\nconst systemPrompt = `Eres el asistente interno de VIP Tech Consulting, una empresa de tecnología y consultoría.\nTu trabajo es redactar respuestas profesionales a clientes, equilibrando excelente servicio con protección comercial.\n\nREGLAS CRÍTICAS:\n- No prometas descuentos, entregas, cambios fuera de scope ni responsabilidades no confirmadas.\n- No inventes información que no tengas disponible.\n- Si falta información crítica, propón una respuesta prudente que compre tiempo para investigar.\n- El email que generes es para revisión humana, NO para envío automático.\n- Responde siempre en español, tono profesional y cercano.\n- Tu respuesta DEBE ser JSON válido con exactamente los campos especificados.\n\nPOLÍTICAS INTERNAS DE LA EMPRESA:\n${policies}\n\nLECCIONES DE INTERACCIONES PREVIAS CON ESTE CLIENTE:\n${lessons}`;\n\n// User prompt\nconst userPrompt = `DATOS DEL CLIENTE:\n${customerInfo}\n\nEMAIL RECIBIDO:\nFecha: ${threadData.date}\nAsunto: ${threadData.subject}\n---\n${threadData.body}\n---\n\nHISTORIAL RESUMIDO DEL THREAD (últimos ${threadData.thread_msg_count} mensajes):\n${threadData.thread_summary || 'Sin historial previo en este thread.'}\n\nGENERA UN JSON con EXACTAMENTE esta estructura (sin texto fuera del JSON):\n{\n  \"case_summary\": \"Resumen breve y claro del caso en 2-3 oraciones\",\n  \"risk_level\": \"bajo|medio|alto\",\n  \"risk_reason\": \"Explicación breve del nivel de riesgo\",\n  \"suggested_reply_subject\": \"Re: ${threadData.subject}\",\n  \"suggested_reply_body\": \"El cuerpo completo del email de respuesta, listo para enviar\",\n  \"reasoning_for_human\": \"Explicación de por qué elegiste esta respuesta y qué consideraciones tuviste\",\n  \"human_review_notes\": [\n    \"Punto 1 que el humano debe verificar antes de enviar\",\n    \"Punto 2 que el humano debe verificar antes de enviar\"\n  ]\n}`;\n\nreturn [{\n  json: {\n    system_prompt: systemPrompt,\n    user_prompt:   userPrompt,\n    // pass through all context\n    ...threadData,\n    policies_loaded: policiesData.length,\n    lessons_loaded:  lessonsData.length\n  }\n}];"
+      }
+    },
+
+    {
+      "id": "aef1b234-0014-4014-8014-000000000014",
+      "name": "OpenAI – Generate Draft",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [2560, 160],
+      "parameters": {
+        "resource": "chat",
+        "operation": "complete",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.system_prompt }}"
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.user_prompt }}"
+            }
+          ]
+        },
+        "options": {
+          "responseFormat": "json_object",
+          "temperature": 0.3,
+          "maxTokens": 2500
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "CONFIGURE_ME_OPENAI",
+          "name": "OpenAI – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0015-4015-8015-000000000015",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2780, 160],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Parse OpenAI Response ────────────────────────────────\nconst openAiOutput = $input.item.json;\nconst contextData  = $('Assemble AI Prompt').first().json;\n\n// Extract the message content\nconst rawContent = openAiOutput.message?.content ||\n                   openAiOutput.choices?.[0]?.message?.content ||\n                   openAiOutput.content ||\n                   '{}';\n\nlet aiResult;\ntry {\n  aiResult = JSON.parse(rawContent);\n} catch (e) {\n  // Fallback if JSON parsing fails\n  aiResult = {\n    case_summary: 'Error al parsear respuesta de IA. Revisar manualmente.',\n    risk_level: 'alto',\n    risk_reason: 'No se pudo procesar la respuesta de IA.',\n    suggested_reply_subject: 'Re: ' + contextData.subject,\n    suggested_reply_body: 'Estimado/a ' + contextData.customer_name + ',\\n\\nHemos recibido su mensaje y lo estamos revisando. Le responderemos a la brevedad.\\n\\nGracias por su paciencia.\\n\\nAtentamente,\\nEquipo VIP Tech Consulting',\n    reasoning_for_human: 'Respuesta generada por fallback. La IA no pudo procesar el contexto correctamente.',\n    human_review_notes: ['Revisar respuesta manualmente - IA tuvo error de procesamiento']\n  };\n}\n\n// Risk level mapping to emoji\nconst riskEmoji = {\n  'bajo':   '🟢',\n  'medio':  '🟡',\n  'alto':   '🔴',\n  'low':    '🟢',\n  'medium': '🟡',\n  'high':   '🔴'\n};\n\nconst riskLevel = (aiResult.risk_level || 'medio').toLowerCase();\n\nreturn {\n  // AI output\n  case_summary:            aiResult.case_summary || '',\n  risk_level:              riskLevel,\n  risk_emoji:              riskEmoji[riskLevel] || '🟡',\n  risk_reason:             aiResult.risk_reason || '',\n  suggested_reply_subject: aiResult.suggested_reply_subject || ('Re: ' + contextData.subject),\n  suggested_reply_body:    aiResult.suggested_reply_body || '',\n  reasoning_for_human:     aiResult.reasoning_for_human || '',\n  human_review_notes:      aiResult.human_review_notes || [],\n  raw_ai_response:         rawContent,\n  // Customer / email context (pass through)\n  message_id:              contextData.message_id,\n  thread_id:               contextData.thread_id,\n  from_email:              contextData.from_email,\n  from_name:               contextData.from_name,\n  subject:                 contextData.subject,\n  body:                    contextData.body,\n  quickbooks_customer_id:  contextData.quickbooks_customer_id || '',\n  customer_name:           contextData.customer_name || '',\n  company_name:            contextData.company_name || '',\n  balance:                 contextData.balance || 0\n};"
+      }
+    },
+
+    {
+      "id": "aef1b234-0016-4016-8016-000000000016",
+      "name": "Create Gmail Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [3000, 160],
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "subject": "={{ $json.suggested_reply_subject }}",
+        "message": "={{ $json.suggested_reply_body }}",
+        "sendTo": "={{ $json.from_email }}",
+        "options": {
+          "threadId": "={{ $json.thread_id }}"
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CONFIGURE_ME_GMAIL",
+          "name": "Gmail OAuth2 – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0017-4017-8017-000000000017",
+      "name": "Add Gmail Label",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [3220, 160],
+      "parameters": {
+        "resource": "message",
+        "operation": "addLabels",
+        "messageId": "={{ $('Parse AI Response').item.json.message_id }}",
+        "labelIds": "={{ $vars.GMAIL_LABEL_AI_REVIEW }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CONFIGURE_ME_GMAIL",
+          "name": "Gmail OAuth2 – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0018-4018-8018-000000000018",
+      "name": "Merge Draft + Label Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3440, 160],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ── Merge draft_id from Create Gmail Draft ───────────────\nconst aiData   = $('Parse AI Response').first().json;\nconst draftRes = $('Create Gmail Draft').first().json;\n\n// Gmail Draft create returns: { id, message: { id, threadId, labelIds } }\nconst draftId = draftRes.id || draftRes.message?.id || 'DRAFT_ID_ERROR';\n\nreturn [{\n  json: {\n    ...aiData,\n    draft_id: draftId\n  }\n}];"
+      }
+    },
+
+    {
+      "id": "aef1b234-0019-4019-8019-000000000019",
+      "name": "Save Draft to Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [3660, 160],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO public.ai_email_drafts (\n  message_id, thread_id, draft_id, quickbooks_customer_id,\n  from_email, customer_name, company_name,\n  original_subject, original_body,\n  ai_case_summary, ai_risk_level, ai_suggested_reply,\n  ai_suggested_subject, reasoning_for_human, human_review_notes,\n  status, created_at\n) VALUES (\n  '{{ $json.message_id }}',\n  '{{ $json.thread_id }}',\n  '{{ $json.draft_id }}',\n  '{{ $json.quickbooks_customer_id }}',\n  '{{ $json.from_email }}',\n  {{ $json.customer_name ? \"'\" + $json.customer_name.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  {{ $json.company_name  ? \"'\" + $json.company_name.replace(/'/g, \"''\")  + \"'\" : 'NULL' }},\n  {{ $json.subject       ? \"'\" + $json.subject.replace(/'/g, \"''\")       + \"'\" : 'NULL' }},\n  {{ $json.body          ? \"'\" + $json.body.replace(/'/g, \"''\").substring(0,8000) + \"'\" : 'NULL' }},\n  {{ $json.case_summary  ? \"'\" + $json.case_summary.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  '{{ $json.risk_level }}',\n  {{ $json.suggested_reply_body ? \"'\" + $json.suggested_reply_body.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  {{ $json.suggested_reply_subject ? \"'\" + $json.suggested_reply_subject.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  {{ $json.reasoning_for_human ? \"'\" + $json.reasoning_for_human.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  '{{ JSON.stringify($json.human_review_notes || []) }}'::jsonb,\n  'pending_review',\n  NOW()\n)\nON CONFLICT (message_id) DO UPDATE SET\n  draft_id   = EXCLUDED.draft_id,\n  status     = EXCLUDED.status,\n  updated_at = NOW()\nRETURNING id, draft_id, status",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_ME_PG",
+          "name": "Supabase PostgreSQL – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0020-4020-8020-000000000020",
+      "name": "Telegram – Team Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [3880, 160],
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "=🔔 *Nuevo Email – Revisión Requerida*\n\n👤 *Cliente:* {{ $('Merge Draft + Label Data').item.json.customer_name || $('Merge Draft + Label Data').item.json.from_name }}\n🏢 *Empresa:* {{ $('Merge Draft + Label Data').item.json.company_name || 'No registrada' }}\n📧 *Email:* `{{ $('Merge Draft + Label Data').item.json.from_email }}`\n📋 *Asunto:* {{ $('Merge Draft + Label Data').item.json.subject }}\n\n{{ $('Merge Draft + Label Data').item.json.risk_emoji }} *Nivel de Riesgo:* {{ $('Merge Draft + Label Data').item.json.risk_level.toUpperCase() }}\n_{{ $('Merge Draft + Label Data').item.json.risk_reason }}_\n\n📝 *Resumen del Caso:*\n{{ $('Merge Draft + Label Data').item.json.case_summary }}\n\n---\n*Respuesta Sugerida (sujeta a revisión):*\n{{ $('Merge Draft + Label Data').item.json.suggested_reply_body.substring(0, 800) }}\n\n---\n⚠️ *Puntos a Revisar:*\n{{ ($('Merge Draft + Label Data').item.json.human_review_notes || []).map((n, i) => (i+1) + '. ' + n).join('\\n') }}\n\n🔑 *Draft ID:* `{{ $('Merge Draft + Label Data').item.json.draft_id }}`\n\n━━━━━━━━━━━━━━━\nResponde con uno de:\n• `APPROVE {{ $('Merge Draft + Label Data').item.json.draft_id }}`\n• `EDIT {{ $('Merge Draft + Label Data').item.json.draft_id }}: [tu feedback]`\n• `REJECT {{ $('Merge Draft + Label Data').item.json.draft_id }}: [razón]`",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_notification": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "CONFIGURE_ME_TELEGRAM",
+          "name": "Telegram Bot – VIP Tech"
+        }
+      }
+    },
+
+    {
+      "id": "aef1b234-0021-4021-8021-000000000021",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [4100, 400],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO public.email_processing_log (message_id, event_type, event_data, error_msg)\nVALUES ('{{ $json.message_id || \"unknown\" }}', 'processing_error', '{}'::jsonb, '{{ $json.error?.message || \"Unknown error\" }}')",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_ME_PG",
+          "name": "Supabase PostgreSQL – VIP Tech"
+        }
+      }
+    }
+  ],
+
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [{"node": "Normalize Email", "type": "main", "index": 0}]
+      ]
+    },
+    "Normalize Email": {
+      "main": [
+        [{"node": "Is Human Email?", "type": "main", "index": 0}]
+      ]
+    },
+    "Is Human Email?": {
+      "main": [
+        [{"node": "Search Customer in QuickBooks", "type": "main", "index": 0}],
+        [{"node": "Stop – Automated Email", "type": "main", "index": 0}]
+      ]
+    },
+    "Search Customer in QuickBooks": {
+      "main": [
+        [{"node": "Extract Customer Data", "type": "main", "index": 0}]
+      ]
+    },
+    "Extract Customer Data": {
+      "main": [
+        [{"node": "Customer Found?", "type": "main", "index": 0}]
+      ]
+    },
+    "Customer Found?": {
+      "main": [
+        [{"node": "Get Gmail Thread History", "type": "main", "index": 0}],
+        [{"node": "Telegram – Unknown Contact Alert", "type": "main", "index": 0}]
+      ]
+    },
+    "Get Gmail Thread History": {
+      "main": [
+        [{"node": "Summarize Thread", "type": "main", "index": 0}]
+      ]
+    },
+    "Summarize Thread": {
+      "main": [
+        [{"node": "Load Company Policies", "type": "main", "index": 0}]
+      ]
+    },
+    "Load Company Policies": {
+      "main": [
+        [{"node": "Load Relevant Lessons", "type": "main", "index": 0}]
+      ]
+    },
+    "Load Relevant Lessons": {
+      "main": [
+        [{"node": "Assemble AI Prompt", "type": "main", "index": 0}]
+      ]
+    },
+    "Assemble AI Prompt": {
+      "main": [
+        [{"node": "OpenAI – Generate Draft", "type": "main", "index": 0}]
+      ]
+    },
+    "OpenAI – Generate Draft": {
+      "main": [
+        [{"node": "Parse AI Response", "type": "main", "index": 0}]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [{"node": "Create Gmail Draft", "type": "main", "index": 0}]
+      ]
+    },
+    "Create Gmail Draft": {
+      "main": [
+        [{"node": "Add Gmail Label", "type": "main", "index": 0}]
+      ]
+    },
+    "Add Gmail Label": {
+      "main": [
+        [{"node": "Merge Draft + Label Data", "type": "main", "index": 0}]
+      ]
+    },
+    "Merge Draft + Label Data": {
+      "main": [
+        [{"node": "Save Draft to Database", "type": "main", "index": 0}]
+      ]
+    },
+    "Save Draft to Database": {
+      "main": [
+        [{"node": "Telegram – Team Notification", "type": "main", "index": 0}]
+      ]
+    }
+  },
+
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "vip-tech-main-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "vip-tech-consulting"
+  },
+  "id": "vip-email-main-001",
+  "tags": [
+    {"id": "tag-vip", "name": "VIP Tech"},
+    {"id": "tag-email", "name": "Email Automation"},
+    {"id": "tag-ai", "name": "AI"}
+  ]
+}
